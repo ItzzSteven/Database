@@ -1,64 +1,62 @@
 const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
+const { createClient } = require('@supabase/supabase-js');
 const app = express();
 
 app.use(express.json());
-
-// Multi-Origin CORS for iPad/Desktop/is-a.dev
-const allowedOrigins = ['https://ItzzSteven.is-a.dev', 'https://itzzsteven.is-a.dev'];
-app.use(cors({
-  origin: (origin, cb) => (!origin || allowedOrigins.includes(origin)) ? cb(null, true) : cb(new Error('CORS Error'))
-}));
+app.use(cors({ origin: 'https://ItzzSteven.is-a.dev' }));
 app.options('*', cors());
 
-let users = []; 
-let forumPosts = [];
+// --- PERMANENT DATABASE CONNECTION ---
+// This reads from the Environment Variables you just added in Render
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
-// AUTH ROUTES
+// --- AUTH ROUTES ---
 app.post('/register', async (req, res) => {
   const { email, password, username } = req.body;
-  if (users.find(u => u.email === email || u.username === username)) {
-    return res.status(400).json({ success: false, error: "User/Email exists" });
-  }
   const hashedPassword = await bcrypt.hash(password, 10);
-  users.push({ email, username, password: hashedPassword });
+  
+  // Saves user to Supabase forever
+  const { error } = await supabase.from('users').insert([
+    { email, username, password: hashedPassword, pfp: `https://ui-avatars.com{username}&background=38bdf8&color=fff` }
+  ]);
+
+  if (error) return res.status(400).json({ success: false, error: "Username or Email taken" });
   res.json({ success: true, message: "Account created!" });
 });
 
 app.post('/login', async (req, res) => {
   const { email, password } = req.body;
-  const user = users.find(u => u.email === email);
+  const { data: user } = await supabase.from('users').select('*').eq('email', email).single();
+
   if (user && await bcrypt.compare(password, user.password)) {
-    return res.json({ success: true, username: user.username });
+    return res.json({ success: true, username: user.username, pfp: user.pfp });
   }
   res.status(401).json({ success: false, error: "Invalid login" });
 });
 
-// FORUM ROUTES
-app.get('/forum/posts', (req, res) => res.json({ success: true, posts: forumPosts }));
-
-app.post('/forum/post', (req, res) => {
-  const { username, message } = req.body;
-  const post = {
-    id: "p" + Date.now(),
-    username, message,
-    pfp: `https://ui-avatars.com{username}`,
-    timestamp: new Date().toLocaleString(),
-    replies: []
-  };
-  forumPosts.unshift(post);
-  res.json({ success: true });
+// --- FORUM ROUTES ---
+app.get('/forum/posts', async (req, res) => {
+  // Loads posts from Supabase
+  const { data } = await supabase.from('forum_posts').select('*').order('created_at', { ascending: false });
+  res.json({ success: true, posts: data || [] });
 });
 
-app.post('/forum/reply', (req, res) => {
+app.post('/forum/post', async (req, res) => {
+  const { username, title, content, pfp } = req.body;
+  const { error } = await supabase.from('forum_posts').insert([{ username, title, content, pfp }]);
+  res.json({ success: !error });
+});
+
+app.post('/forum/reply', async (req, res) => {
   const { postId, username, message } = req.body;
-  const post = forumPosts.find(p => p.id === postId);
-  if (post) {
-    post.replies.push({ username, message, timestamp: new Date().toLocaleString() });
-    res.json({ success: true });
-  } else { res.status(404).json({ error: "Not found" }); }
+  const { data: post } = await supabase.from('forum_posts').select('replies').eq('id', postId).single();
+  
+  const updatedReplies = [...(post.replies || []), { username, message, timestamp: new Date().toLocaleString() }];
+  
+  const { error } = await supabase.from('forum_posts').update({ replies: updatedReplies }).eq('id', postId);
+  res.json({ success: !error });
 });
 
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`Server live on ${PORT}`));
+app.listen(process.env.PORT || 10000);
