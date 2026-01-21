@@ -8,7 +8,7 @@ app.use(express.json());
 
 // 2. STRENGTHENED CORS SETTINGS
 // Ensure NO trailing slash at the end of the URL
-const allowedOrigin = 'https://ItzzSteven.is-a.dev';
+const allowedOrigin = 'https://itzzsteven.is-a.dev';
 
 app.use(cors({ 
   origin: allowedOrigin,
