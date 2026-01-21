@@ -3,74 +3,62 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const app = express();
 
-// 1. MIDDLEWARE
 app.use(express.json());
 
-// 2. STRICTOR CORS FOR IPAD/MOBILE
-const allowedOrigins = [
-  'https://ItzzSteven.is-a.dev', 
-  'https://itzzsteven.is-a.dev',
-  'https://www.ItzzSteven.is-a.dev',
-  'https://www.itzzsteven.is-a.dev'
-];
-
+// Multi-Origin CORS for iPad/Desktop/is-a.dev
+const allowedOrigins = ['https://ItzzSteven.is-a.dev', 'https://itzzsteven.is-a.dev'];
 app.use(cors({
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps) or if in allowed list
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      console.log("Blocked by CORS:", origin);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
+  origin: (origin, cb) => (!origin || allowedOrigins.includes(origin)) ? cb(null, true) : cb(new Error('CORS Error'))
 }));
-
-// IMPORTANT: This handles the "Preflight" test iPads send before logging in
 app.options('*', cors());
 
-// 3. DATABASE (Temporary list - resets when server sleeps)
 let users = []; 
+let forumPosts = [];
 
-// 4. ROUTES
-app.get('/', (req, res) => {
-  res.send('Server is live, encrypted, and allowing all versions of is-a.dev!');
-});
-
-// Register Route
+// AUTH ROUTES
 app.post('/register', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    if (users.find(u => u.email === email)) {
-      return res.status(400).json({ success: false, error: "User already exists" });
-    }
-    const hashedPassword = await bcrypt.hash(password, 10);
-    users.push({ email, password: hashedPassword });
-    res.json({ success: true, message: "Registered securely!" });
-  } catch (err) {
-    res.status(500).json({ success: false, error: "Server Error" });
+  const { email, password, username } = req.body;
+  if (users.find(u => u.email === email || u.username === username)) {
+    return res.status(400).json({ success: false, error: "User/Email exists" });
   }
+  const hashedPassword = await bcrypt.hash(password, 10);
+  users.push({ email, username, password: hashedPassword });
+  res.json({ success: true, message: "Account created!" });
 });
 
-// Login Route
 app.post('/login', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    const user = users.find(u => u.email === email);
-    if (user && await bcrypt.compare(password, user.password)) {
-      return res.json({ success: true, message: "Logged in securely!" });
-    }
-    res.status(401).json({ success: false, error: "Invalid email or password" });
-  } catch (err) {
-    res.status(500).json({ success: false, error: "Server Error" });
+  const { email, password } = req.body;
+  const user = users.find(u => u.email === email);
+  if (user && await bcrypt.compare(password, user.password)) {
+    return res.json({ success: true, username: user.username });
   }
+  res.status(401).json({ success: false, error: "Invalid login" });
 });
 
-// 5. START SERVER
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+// FORUM ROUTES
+app.get('/forum/posts', (req, res) => res.json({ success: true, posts: forumPosts }));
+
+app.post('/forum/post', (req, res) => {
+  const { username, message } = req.body;
+  const post = {
+    id: "p" + Date.now(),
+    username, message,
+    pfp: `https://ui-avatars.com{username}`,
+    timestamp: new Date().toLocaleString(),
+    replies: []
+  };
+  forumPosts.unshift(post);
+  res.json({ success: true });
 });
+
+app.post('/forum/reply', (req, res) => {
+  const { postId, username, message } = req.body;
+  const post = forumPosts.find(p => p.id === postId);
+  if (post) {
+    post.replies.push({ username, message, timestamp: new Date().toLocaleString() });
+    res.json({ success: true });
+  } else { res.status(404).json({ error: "Not found" }); }
+});
+
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log(`Server live on ${PORT}`));
