@@ -6,7 +6,7 @@ const app = express();
 
 app.use(express.json());
 
-const allowedOrigins = ['https://ItzzSteven.is-a.dev', 'https://itzzsteven.is-a.dev'];
+const allowedOrigins = ['htts://www.v1p3r.pages.dev', 'https://v1p3r.pages.dev'];
 app.use(cors({
   origin: (origin, cb) => (!origin || allowedOrigins.includes(origin)) ? cb(null, true) : cb(new Error('CORS Error'))
 }));
