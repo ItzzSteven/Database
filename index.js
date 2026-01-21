@@ -1,37 +1,62 @@
 const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
-const { createClient } = require('@supabase/supabase-js');
+const mongoose = require('mongoose'); // Switched from Supabase to Mongoose
 const app = express();
 
 app.use(express.json());
 
-// 2026 iPad & Cross-Domain CORS Fix
 const allowedOrigins = ['https://ItzzSteven.is-a.dev', 'https://itzzsteven.is-a.dev'];
 app.use(cors({
   origin: (origin, cb) => (!origin || allowedOrigins.includes(origin)) ? cb(null, true) : cb(new Error('CORS Error'))
 }));
-app.options('*', cors());
 
-// Database Connection
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+// --- DATABASE CONNECTION ---
+// Connect to MongoDB using an environment variable
+mongoose.connect(process.env.MONGODB_URI)
+  .then(() => console.log('Connected to MongoDB'))
+  .catch(err => console.error('DB Connection Error:', err));
 
-app.get('/', (req, res) => res.send('Viper API Live & Connected to Supabase'));
+// --- SCHEMAS ---
+const userSchema = new mongoose.Schema({
+  email: { type: String, unique: true, required: true },
+  username: { type: String, unique: true, required: true },
+  password: { type: String, required: true },
+  pfp: String
+});
+
+const postSchema = new mongoose.Schema({
+  username: String,
+  title: String,
+  content: String,
+  pfp: String,
+  replies: [{ username: String, message: String, pfp: String, timestamp: String }],
+  created_at: { type: Date, default: Date.now }
+});
+
+const User = mongoose.model('User', userSchema);
+const Post = mongoose.model('Post', postSchema);
+
+app.get('/', (req, res) => res.send('Viper API Live & Connected to MongoDB'));
 
 // --- AUTH ROUTES ---
 app.post('/register', async (req, res) => {
-  const { email, password, username } = req.body;
-  const hashedPassword = await bcrypt.hash(password, 10);
-  const pfp = `https://ui-avatars.com{username}&background=38bdf8&color=fff`;
-  
-  const { error } = await supabase.from('users').insert([{ email, username, password: hashedPassword, pfp }]);
-  if (error) return res.status(400).json({ success: false, error: "User/Email exists" });
-  res.json({ success: true });
+  try {
+    const { email, password, username } = req.body;
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const pfp = `https://ui-avatars.com{username}&background=38bdf8&color=fff`;
+    
+    const newUser = new User({ email, username, password: hashedPassword, pfp });
+    await newUser.save();
+    res.json({ success: true });
+  } catch (error) {
+    res.status(400).json({ success: false, error: "User or Email already exists" });
+  }
 });
 
 app.post('/login', async (req, res) => {
   const { email, password } = req.body;
-  const { data: user } = await supabase.from('users').select('*').eq('email', email).single();
+  const user = await User.findOne({ email });
   if (user && await bcrypt.compare(password, user.password)) {
     return res.json({ success: true, username: user.username, pfp: user.pfp });
   }
@@ -40,26 +65,31 @@ app.post('/login', async (req, res) => {
 
 // --- FORUM ROUTES ---
 app.get('/forum/posts', async (req, res) => {
-  const { data } = await supabase.from('forum_posts').select('*').order('created_at', { ascending: false });
-  res.json({ success: true, posts: data || [] });
+  const posts = await Post.find().sort({ created_at: -1 });
+  res.json({ success: true, posts });
 });
 
 app.post('/forum/post', async (req, res) => {
-  const { username, title, content, pfp } = req.body;
-  const { error } = await supabase.from('forum_posts').insert([{ username, title, content, pfp }]);
-  res.json({ success: !error });
+  try {
+    const { username, title, content, pfp } = req.body;
+    const newPost = new Post({ username, title, content, pfp });
+    await newPost.save();
+    res.json({ success: true });
+  } catch (error) {
+    res.json({ success: false });
+  }
 });
 
 app.post('/forum/reply', async (req, res) => {
-  const { postId, username, message, pfp } = req.body;
-  const { data: post } = await supabase.from('forum_posts').select('replies').eq('id', postId).single();
-  
-  const updatedReplies = [...(post.replies || []), { 
-    username, message, pfp, timestamp: new Date().toLocaleString() 
-  }];
-  
-  const { error } = await supabase.from('forum_posts').update({ replies: updatedReplies }).eq('id', postId);
-  res.json({ success: !error });
+  try {
+    const { postId, username, message, pfp } = req.body;
+    const reply = { username, message, pfp, timestamp: new Date().toLocaleString() };
+    
+    await Post.findByIdAndUpdate(postId, { $push: { replies: reply } });
+    res.json({ success: true });
+  } catch (error) {
+    res.json({ success: false });
+  }
 });
 
 const PORT = process.env.PORT || 10000;
