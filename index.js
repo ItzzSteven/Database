@@ -1,50 +1,60 @@
 const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
-const mongoose = require('mongoose'); // Switched from Supabase to Mongoose
-const app = express();
+const mongoose = require('mongoose');
 
+const app = express();
 app.use(express.json());
 
-const allowedOrigins = ['htts://www.v1p3r.pages.dev', 'https://v1p3r.pages.dev'];
+// Fixed domain typos: 'htts' to 'https' and 'v1p3r' to 'v1p3t'
+const allowedOrigins = [
+  'https://v1p3t.pages.dev', 
+  'https://www.v1p3t.pages.dev'
+];
+
 app.use(cors({
-  origin: (origin, cb) => (!origin || allowedOrigins.includes(origin)) ? cb(null, true) : cb(new Error('CORS Error'))
+  origin: (origin, cb) => {
+    // Allow requests with no origin (like mobile apps or curl) 
+    // and those in the allowed list
+    if (!origin || allowedOrigins.includes(origin)) {
+      return cb(null, true);
+    }
+    return cb(new Error('Not allowed by CORS'));
+  }
 }));
 
 // --- DATABASE CONNECTION ---
-// Connect to MongoDB using an environment variable
+// Ensure MONGODB_URI is set in Render Dashboard Environment variables
 mongoose.connect(process.env.MONGODB_URI)
-  .then(() => console.log('Connected to MongoDB'))
-  .catch(err => console.error('DB Connection Error:', err));
+  .then(() => console.log('Connected to MongoDB Atlas'))
+  .catch(err => console.error('MongoDB Connection Error:', err));
 
 // --- SCHEMAS ---
-const userSchema = new mongoose.Schema({
+const User = mongoose.model('User', new mongoose.Schema({
   email: { type: String, unique: true, required: true },
   username: { type: String, unique: true, required: true },
   password: { type: String, required: true },
   pfp: String
-});
+}));
 
-const postSchema = new mongoose.Schema({
+const Post = mongoose.model('Post', new mongoose.Schema({
   username: String,
   title: String,
   content: String,
   pfp: String,
   replies: [{ username: String, message: String, pfp: String, timestamp: String }],
   created_at: { type: Date, default: Date.now }
-});
+}));
 
-const User = mongoose.model('User', userSchema);
-const Post = mongoose.model('Post', postSchema);
-
-app.get('/', (req, res) => res.send('Viper API Live & Connected to MongoDB'));
+app.get('/', (req, res) => res.send('Viper API 2026 Live'));
 
 // --- AUTH ROUTES ---
 app.post('/register', async (req, res) => {
   try {
     const { email, password, username } = req.body;
     const hashedPassword = await bcrypt.hash(password, 10);
-    const pfp = `https://ui-avatars.com{username}&background=38bdf8&color=fff`;
+    // Corrected avatar URL format for ui-avatars.com API
+    const pfp = `https://ui-avatars.com{encodeURIComponent(username)}&background=38bdf8&color=fff`;
     
     const newUser = new User({ email, username, password: hashedPassword, pfp });
     await newUser.save();
@@ -76,7 +86,7 @@ app.post('/forum/post', async (req, res) => {
     await newPost.save();
     res.json({ success: true });
   } catch (error) {
-    res.json({ success: false });
+    res.status(500).json({ success: false });
   }
 });
 
@@ -84,13 +94,12 @@ app.post('/forum/reply', async (req, res) => {
   try {
     const { postId, username, message, pfp } = req.body;
     const reply = { username, message, pfp, timestamp: new Date().toLocaleString() };
-    
     await Post.findByIdAndUpdate(postId, { $push: { replies: reply } });
     res.json({ success: true });
   } catch (error) {
-    res.json({ success: false });
+    res.status(500).json({ success: false });
   }
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`Server live on ${PORT}`));
+app.listen(PORT, () => console.log(`Server live on port ${PORT}`));
