@@ -1,105 +1,101 @@
 const express = require('express');
 const cors = require('cors');
-const bcrypt = require('bcryptjs');
-const mongoose = require('mongoose');
-
+const fs = require('fs');
 const app = express();
-app.use(express.json());
 
-// Fixed domain typos: 'htts' to 'https' and 'v1p3r' to 'v1p3t'
-const allowedOrigins = [
-  'https://v1p3r.pages.dev', 
-  'https://www.v1p3r.pages.dev'
-];
+// 1. Middleware
+app.use(cors()); // Allows your website to talk to this server
+app.use(express.json()); // Allows server to read JSON data sent from HTML
 
-app.use(cors({
-  origin: (origin, cb) => {
-    // Allow requests with no origin (like mobile apps or curl) 
-    // and those in the allowed list
-    if (!origin || allowedOrigins.includes(origin)) {
-      return cb(null, true);
-    }
-    return cb(new Error('Not allowed by CORS'));
-  }
-}));
+// 2. Database Simulation (Using a JSON file)
+const DB_FILE = './database.json';
 
-// --- DATABASE CONNECTION ---
-// Ensure MONGODB_URI is set in Render Dashboard Environment variables
-mongoose.connect(process.env.MONGODB_URI)
-  .then(() => console.log('Connected to MongoDB Atlas'))
-  .catch(err => console.error('MongoDB Connection Error:', err));
+// Initialize DB file if it doesn't exist
+if (!fs.existsSync(DB_FILE)) {
+    fs.writeFileSync(DB_FILE, JSON.stringify({ users: [], posts: [] }));
+}
 
-// --- SCHEMAS ---
-const User = mongoose.model('User', new mongoose.Schema({
-  email: { type: String, unique: true, required: true },
-  username: { type: String, unique: true, required: true },
-  password: { type: String, required: true },
-  pfp: String
-}));
-
-const Post = mongoose.model('Post', new mongoose.Schema({
-  username: String,
-  title: String,
-  content: String,
-  pfp: String,
-  replies: [{ username: String, message: String, pfp: String, timestamp: String }],
-  created_at: { type: Date, default: Date.now }
-}));
-
-app.get('/', (req, res) => res.send('Viper API 2026 Live'));
+function getData() { return JSON.parse(fs.readFileSync(DB_FILE)); }
+function saveData(data) { fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2)); }
 
 // --- AUTH ROUTES ---
-app.post('/register', async (req, res) => {
-  try {
+
+app.post('/register', (req, res) => {
     const { email, password, username } = req.body;
-    const hashedPassword = await bcrypt.hash(password, 10);
-    // Corrected avatar URL format for ui-avatars.com API
-    const pfp = `https://ui-avatars.com{encodeURIComponent(username)}&background=38bdf8&color=fff`;
+    const data = getData();
+
+    if (data.users.find(u => u.email === email)) {
+        return res.json({ success: false, error: "User already exists" });
+    }
+
+    const newUser = { 
+        email, 
+        password, 
+        username, 
+        pfp: `https://ui-avatars.com{username}&background=random` 
+    };
     
-    const newUser = new User({ email, username, password: hashedPassword, pfp });
-    await newUser.save();
+    data.users.push(newUser);
+    saveData(data);
     res.json({ success: true });
-  } catch (error) {
-    res.status(400).json({ success: false, error: "User or Email already exists" });
-  }
 });
 
-app.post('/login', async (req, res) => {
-  const { email, password } = req.body;
-  const user = await User.findOne({ email });
-  if (user && await bcrypt.compare(password, user.password)) {
-    return res.json({ success: true, username: user.username, pfp: user.pfp });
-  }
-  res.status(401).json({ success: false, error: "Invalid login" });
+app.post('/login', (req, res) => {
+    const { email, password } = req.body;
+    const data = getData();
+    const user = data.users.find(u => u.email === email && u.password === password);
+
+    if (user) {
+        res.json({ success: true, username: user.username, pfp: user.pfp });
+    } else {
+        res.json({ success: false, error: "Invalid email or password" });
+    }
 });
 
 // --- FORUM ROUTES ---
-app.get('/forum/posts', async (req, res) => {
-  const posts = await Post.find().sort({ created_at: -1 });
-  res.json({ success: true, posts });
+
+app.get('/forum/posts', (req, res) => {
+    const data = getData();
+    // Sort by newest first
+    const sortedPosts = [...data.posts].reverse();
+    res.json({ posts: sortedPosts });
 });
 
-app.post('/forum/post', async (req, res) => {
-  try {
-    const { username, title, content, pfp } = req.body;
-    const newPost = new Post({ username, title, content, pfp });
-    await newPost.save();
+app.post('/forum/post', (req, res) => {
+    const { username, pfp, title, content } = req.body;
+    const data = getData();
+    
+    const newPost = {
+        id: Date.now().toString(),
+        username,
+        pfp,
+        title,
+        content,
+        created_at: new Date(),
+        replies: []
+    };
+
+    data.posts.push(newPost);
+    saveData(data);
     res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ success: false });
-  }
 });
 
-app.post('/forum/reply', async (req, res) => {
-  try {
-    const { postId, username, message, pfp } = req.body;
-    const reply = { username, message, pfp, timestamp: new Date().toLocaleString() };
-    await Post.findByIdAndUpdate(postId, { $push: { replies: reply } });
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ success: false });
-  }
+app.post('/forum/reply', (req, res) => {
+    const { postId, username, pfp, message } = req.body;
+    const data = getData();
+    const post = data.posts.find(p => p.id === postId);
+
+    if (post) {
+        post.replies.push({ username, pfp, message, created_at: new Date() });
+        saveData(data);
+        res.json({ success: true });
+    } else {
+        res.json({ success: false, error: "Post not found" });
+    }
 });
 
+// 3. Start Server (Fixed for Render 2026)
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`Server live on port ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Viper Backend Live on port ${PORT}`);
+});
