@@ -8,8 +8,8 @@ app.use(express.json());
 
 // Fixed domain typos: 'htts' to 'https' and 'v1p3r' to 'v1p3t'
 const allowedOrigins = [
-  'https://v1p3t.pages.dev', 
-  'https://www.v1p3t.pages.dev'
+  'https://v1p3r.pages.dev', 
+  'https://www.v1p3r.pages.dev'
 ];
 
 app.use(cors({
